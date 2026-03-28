@@ -18,6 +18,7 @@ import type {
   BatchSummary,
   BatchTaskWithJobs,
   GenerateOptions,
+  SearchMetadata,
   RewriteOptions,
   RewriteSource
 } from '@shared/types';
@@ -673,6 +674,15 @@ function App(): JSX.Element {
                 </label>
 
                 <label className="field">
+                  <span>Brave Search API Key（可选）</span>
+                  <input
+                    type="password"
+                    value={settingsDraft.braveApiKey}
+                    onChange={(event) => setSettingsDraft({ ...settingsDraft, braveApiKey: event.target.value })}
+                  />
+                </label>
+
+                <label className="field">
                   <span>模型名称</span>
                   <input
                     type="text"
@@ -825,6 +835,23 @@ function App(): JSX.Element {
                     }
                   />
                 </label>
+
+                <label className="field field--wide field--toggle">
+                  <input
+                    checked={settingsDraft.defaultGenerateOptions.freshSearchEnabled}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        defaultGenerateOptions: {
+                          ...settingsDraft.defaultGenerateOptions,
+                          freshSearchEnabled: event.target.checked
+                        }
+                      })
+                    }
+                  />
+                  <span>默认启用实时搜索（自动判断）</span>
+                </label>
               </div>
 
               <div className="action-row">
@@ -853,7 +880,7 @@ interface OptionsPanelProps {
   onRewriteChange: (options: RewriteOptions) => void;
 }
 
-function OptionsPanel(props: OptionsPanelProps): JSX.Element {
+export function OptionsPanel(props: OptionsPanelProps): JSX.Element {
   if (props.mode === 'generate') {
     const options = props.generateOptions;
 
@@ -931,6 +958,20 @@ function OptionsPanel(props: OptionsPanelProps): JSX.Element {
             }
           />
           <span>开头增强吸引力</span>
+        </label>
+
+        <label className="field field--toggle">
+          <input
+            checked={options.freshSearchEnabled}
+            type="checkbox"
+            onChange={(event) =>
+              props.onGenerateChange({
+                ...options,
+                freshSearchEnabled: event.target.checked
+              })
+            }
+          />
+          <span>启用实时搜索（自动判断）</span>
         </label>
 
         <label className="field field--wide">
@@ -1078,10 +1119,12 @@ interface BatchWorkspaceProps {
   onOpenPath: (path: string) => Promise<void>;
 }
 
-function BatchWorkspace(props: BatchWorkspaceProps): JSX.Element {
+export function BatchWorkspace(props: BatchWorkspaceProps): JSX.Element {
   if (!props.batch) {
     return <div className="empty-state empty-state--large">这里会显示当前批次的任务队列和文章预览。</div>;
   }
+
+  const searchMetadata = getSearchMetadata(props.selection);
 
   return (
     <div className="batch-workspace">
@@ -1176,11 +1219,13 @@ function BatchWorkspace(props: BatchWorkspaceProps): JSX.Element {
                   </article>
                 </div>
               ) : (
-                <article className="article-card article-card--full">
-                  <h5>文章预览</h5>
-                  <pre>{props.selection.resultText || props.selection.errorMessage || '等待生成中...'}</pre>
-                </article>
+                  <article className="article-card article-card--full">
+                    <h5>文章预览</h5>
+                    <pre>{props.selection.resultText || props.selection.errorMessage || '等待生成中...'}</pre>
+                  </article>
               )}
+
+              {props.selection.type === 'generate' ? <SearchContextPanel searchMetadata={searchMetadata} /> : null}
             </>
           ) : (
             <div className="empty-state empty-state--large">选择左侧任务后，这里会展示文章内容。</div>
@@ -1189,6 +1234,70 @@ function BatchWorkspace(props: BatchWorkspaceProps): JSX.Element {
       </div>
     </div>
   );
+}
+
+export function SearchContextPanel(props: { searchMetadata: SearchMetadata | null }): JSX.Element {
+  const { searchMetadata } = props;
+
+  if (!searchMetadata) {
+    return (
+      <article className="article-card search-card">
+        <h5>实时检索</h5>
+        <p>当前任务还没有实时检索记录。</p>
+      </article>
+    );
+  }
+
+  return (
+    <article className="article-card search-card">
+      <div className="search-card__header">
+        <div>
+          <h5>实时检索</h5>
+          <p>
+            状态：
+            {searchMetadata.status === 'used'
+              ? '已使用'
+              : searchMetadata.status === 'failed'
+                ? '检索失败'
+                : '已跳过'}
+          </p>
+        </div>
+        {searchMetadata.query ? <span className="pill pill--search">{searchMetadata.query}</span> : null}
+      </div>
+
+      <div className="inline-notes">
+        <span>{searchMetadata.triggerReason}</span>
+        {searchMetadata.errorMessage ? <span>{searchMetadata.errorMessage}</span> : null}
+      </div>
+
+      {searchMetadata.status === 'used' && searchMetadata.sources.length > 0 ? (
+        <div className="search-source-list">
+          {searchMetadata.sources.map((source) => (
+            <section
+              key={source.url}
+              className="search-source-card"
+            >
+              <div className="search-source-card__header">
+                <strong>{source.title}</strong>
+                {source.publishedAt ? <small>{source.publishedAt}</small> : null}
+              </div>
+              <p className="search-source-card__url">{source.url}</p>
+              <ul className="search-source-card__snippets">
+                {source.snippets.map((snippet, index) => (
+                  <li key={`${source.url}-${index}`}>{snippet}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function getSearchMetadata(job: ArticleJob | null): SearchMetadata | null {
+  const search = job?.metadata?.search;
+  return search ?? null;
 }
 
 function toMessage(error: unknown): string {

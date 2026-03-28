@@ -8,10 +8,16 @@ export interface GenerateOptions {
   stylePreset: string;
   tonePreset: string;
   openingHookEnabled: boolean;
+  freshSearchEnabled: boolean;
   avoidTerms: string;
 }
 
-export interface RewriteOptions extends GenerateOptions {
+export interface RewriteOptions {
+  targetLength: number;
+  stylePreset: string;
+  tonePreset: string;
+  openingHookEnabled: boolean;
+  avoidTerms: string;
   rewriteStrength: RewriteStrength;
   preserveOriginalMeaning: boolean;
 }
@@ -19,6 +25,7 @@ export interface RewriteOptions extends GenerateOptions {
 export interface AppSettings {
   apiBaseUrl: string;
   apiKey: string;
+  braveApiKey: string;
   model: string;
   timeoutMs: number;
   retryCount: number;
@@ -26,6 +33,32 @@ export interface AppSettings {
   defaultExportDir: string;
   defaultGenerateOptions: GenerateOptions;
   defaultRewriteOptions: RewriteOptions;
+}
+
+export interface SearchSource {
+  title: string;
+  url: string;
+  snippets: string[];
+  publishedAt: string | null;
+}
+
+export interface SearchMetadata {
+  provider: 'brave';
+  status: 'used' | 'skipped' | 'failed';
+  query: string | null;
+  triggerReason: string;
+  sources: SearchSource[];
+  errorMessage: string | null;
+  fetchedAt: string | null;
+}
+
+export interface ArticleJobMetadata {
+  endpoint?: string;
+  request?: unknown;
+  response?: unknown;
+  attempt?: number;
+  search?: SearchMetadata;
+  [key: string]: unknown;
 }
 
 export interface ArticleJob {
@@ -40,7 +73,7 @@ export interface ArticleJob {
   createdAt: string;
   finishedAt: string | null;
   exportPath: string | null;
-  metadata: Record<string, unknown> | null;
+  metadata: ArticleJobMetadata | null;
   orderIndex: number;
   sourceFilePath: string | null;
 }

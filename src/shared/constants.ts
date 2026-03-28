@@ -17,6 +17,7 @@ export const DEFAULT_GENERATE_OPTIONS: GenerateOptions = {
   stylePreset: STYLE_PRESETS[0],
   tonePreset: TONE_PRESETS[0],
   openingHookEnabled: true,
+  freshSearchEnabled: true,
   avoidTerms: '绝对、震惊、内幕、必看'
 };
 
@@ -30,6 +31,7 @@ export const DEFAULT_REWRITE_OPTIONS: RewriteOptions = {
 export const DEFAULT_SETTINGS: AppSettings = {
   apiBaseUrl: 'https://api.openai.com/v1',
   apiKey: '',
+  braveApiKey: '',
   model: '',
   timeoutMs: 60000,
   retryCount: 1,

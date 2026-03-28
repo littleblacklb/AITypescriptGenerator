@@ -1,6 +1,6 @@
-import { buildGeneratePrompts, buildRewritePrompts } from './prompt-service';
+import { buildGeneratePromptsWithGrounding, buildRewritePrompts } from './prompt-service';
 
-import type { AppSettings, GenerateOptions, RewriteOptions } from '@shared/types';
+import type { AppSettings, GenerateOptions, RewriteOptions, SearchMetadata } from '@shared/types';
 
 interface CompletionResult {
   content: string;
@@ -12,9 +12,10 @@ export class LlmService {
     title: string,
     settings: AppSettings,
     options: GenerateOptions,
+    searchMetadata: SearchMetadata | null,
     signal?: AbortSignal
   ): Promise<CompletionResult> {
-    const prompts = buildGeneratePrompts(title, options);
+    const prompts = buildGeneratePromptsWithGrounding(title, options, searchMetadata);
     return this.requestCompletion(settings, prompts.systemPrompt, prompts.userPrompt, 0.8, signal);
   }
 

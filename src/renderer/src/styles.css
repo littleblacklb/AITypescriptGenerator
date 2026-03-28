@@ -168,6 +168,11 @@ button {
   font-size: 13px;
 }
 
+.pill--search {
+  max-width: 100%;
+  word-break: break-word;
+}
+
 .banner {
   padding: 14px 16px;
   border-radius: 16px;
@@ -416,6 +421,46 @@ button {
 
 .article-card--full {
   flex: 1;
+}
+
+.search-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.search-card__header,
+.search-source-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.search-source-list {
+  display: grid;
+  gap: 12px;
+}
+
+.search-source-card {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(250, 246, 239, 0.84);
+  border: 1px solid rgba(67, 49, 26, 0.08);
+}
+
+.search-source-card__url {
+  margin-top: 8px;
+  color: #5f6f57;
+  word-break: break-word;
+}
+
+.search-source-card__snippets {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #4d4032;
+  display: grid;
+  gap: 8px;
 }
 
 .article-card pre {

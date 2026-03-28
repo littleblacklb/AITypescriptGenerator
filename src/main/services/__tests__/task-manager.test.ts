@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_GENERATE_OPTIONS, DEFAULT_SETTINGS } from '../../../shared/constants';
+import { DEFAULT_GENERATE_OPTIONS, DEFAULT_REWRITE_OPTIONS, DEFAULT_SETTINGS } from '../../../shared/constants';
 import type { AppSettings, ArticleJob, BatchSummary, BatchTask, BatchTaskWithJobs } from '../../../shared/types';
 import { TaskManager } from '../task-manager';
 
@@ -138,7 +138,14 @@ describe('TaskManager concurrency', () => {
     let peakActiveCount = 0;
 
     const llmService = {
-      generateArticle: vi.fn(async (title: string, _settings: AppSettings, _options: typeof DEFAULT_GENERATE_OPTIONS) => {
+      generateArticle: vi.fn(
+        async (
+          title: string,
+          _settings: AppSettings,
+          _options: typeof DEFAULT_GENERATE_OPTIONS,
+          _searchMetadata: unknown,
+          _signal?: AbortSignal
+        ) => {
         activeCount += 1;
         peakActiveCount = Math.max(peakActiveCount, activeCount);
         started.push(title);
@@ -152,14 +159,26 @@ describe('TaskManager concurrency', () => {
           content: `${title} result`,
           metadata: {}
         };
-      }),
+      }
+      ),
       rewriteArticle: vi.fn()
     };
 
     const taskManager = new TaskManager(
       database as unknown as ConstructorParameters<typeof TaskManager>[0],
       llmService as unknown as ConstructorParameters<typeof TaskManager>[1],
-      {} as ConstructorParameters<typeof TaskManager>[2]
+      {} as ConstructorParameters<typeof TaskManager>[2],
+      {
+        searchGenerateGrounding: vi.fn(async () => ({
+          provider: 'brave',
+          status: 'skipped',
+          query: null,
+          triggerReason: '未配置 Brave Search API Key',
+          sources: [],
+          errorMessage: null,
+          fetchedAt: null
+        }))
+      } as unknown as ConstructorParameters<typeof TaskManager>[3]
     );
 
     const batch = await taskManager.createGenerateBatch({
@@ -200,21 +219,40 @@ describe('TaskManager concurrency', () => {
     const started: string[] = [];
 
     const llmService = {
-      generateArticle: vi.fn(async (title: string, _settings: AppSettings, _options: typeof DEFAULT_GENERATE_OPTIONS, signal?: AbortSignal) => {
-        started.push(title);
-        await waitForSignal(signal, new Promise<void>(() => undefined));
-        return {
-          content: `${title} result`,
-          metadata: {}
-        };
-      }),
+      generateArticle: vi.fn(
+        async (
+          title: string,
+          _settings: AppSettings,
+          _options: typeof DEFAULT_GENERATE_OPTIONS,
+          _searchMetadata: unknown,
+          signal?: AbortSignal
+        ) => {
+          started.push(title);
+          await waitForSignal(signal, new Promise<void>(() => undefined));
+          return {
+            content: `${title} result`,
+            metadata: {}
+          };
+        }
+      ),
       rewriteArticle: vi.fn()
     };
 
     const taskManager = new TaskManager(
       database as unknown as ConstructorParameters<typeof TaskManager>[0],
       llmService as unknown as ConstructorParameters<typeof TaskManager>[1],
-      {} as ConstructorParameters<typeof TaskManager>[2]
+      {} as ConstructorParameters<typeof TaskManager>[2],
+      {
+        searchGenerateGrounding: vi.fn(async () => ({
+          provider: 'brave',
+          status: 'skipped',
+          query: null,
+          triggerReason: '未配置 Brave Search API Key',
+          sources: [],
+          errorMessage: null,
+          fetchedAt: null
+        }))
+      } as unknown as ConstructorParameters<typeof TaskManager>[3]
     );
 
     const batch = await taskManager.createGenerateBatch({
@@ -233,5 +271,161 @@ describe('TaskManager concurrency', () => {
       expect(nextBatch?.status).toBe('cancelled');
       expect(nextBatch?.jobs.every((job) => job.status === 'cancelled')).toBe(true);
     });
+  });
+
+  it('calls Brave search only once per generate job and reuses it across LLM retries', async () => {
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      apiKey: 'test-key',
+      braveApiKey: 'brave-key',
+      model: 'test-model',
+      maxConcurrentJobs: 1,
+      retryCount: 1
+    };
+    const database = new FakeDatabaseService(settings);
+    const searchService = {
+      searchGenerateGrounding: vi.fn(async () => ({
+        provider: 'brave' as const,
+        status: 'used' as const,
+        query: '2026 年 AI 模型排行榜',
+        triggerReason: '标题包含明确的时间表达',
+        sources: [
+          {
+            title: '模型榜单',
+            url: 'https://example.com/ranking',
+            snippets: ['榜单摘要'],
+            publishedAt: '2026-03-20'
+          }
+        ],
+        errorMessage: null,
+        fetchedAt: '2026-03-28T12:00:00.000Z'
+      }))
+    };
+    const llmService = {
+      generateArticle: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('temporary failure'))
+        .mockResolvedValueOnce({
+          content: '最终文章',
+          metadata: {}
+        }),
+      rewriteArticle: vi.fn()
+    };
+
+    const taskManager = new TaskManager(
+      database as unknown as ConstructorParameters<typeof TaskManager>[0],
+      llmService as unknown as ConstructorParameters<typeof TaskManager>[1],
+      {} as ConstructorParameters<typeof TaskManager>[2],
+      searchService as unknown as ConstructorParameters<typeof TaskManager>[3]
+    );
+
+    const batch = await taskManager.createGenerateBatch({
+      titles: ['2026 年 AI 模型排行榜'],
+      options: DEFAULT_GENERATE_OPTIONS
+    });
+
+    await waitForCondition(async () => {
+      const nextBatch = await taskManager.getBatch(batch.id);
+      expect(nextBatch?.status).toBe('completed');
+      expect(nextBatch?.jobs[0]?.resultText).toBe('最终文章');
+    });
+
+    expect(searchService.searchGenerateGrounding).toHaveBeenCalledTimes(1);
+    expect(llmService.generateArticle).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to normal generation when Brave search fails', async () => {
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      apiKey: 'test-key',
+      braveApiKey: 'brave-key',
+      model: 'test-model',
+      maxConcurrentJobs: 1
+    };
+    const database = new FakeDatabaseService(settings);
+    const searchService = {
+      searchGenerateGrounding: vi.fn(async () => ({
+        provider: 'brave' as const,
+        status: 'failed' as const,
+        query: '最新 AI 模型价格对比',
+        triggerReason: '标题包含最新或当前类表述',
+        sources: [],
+        errorMessage: 'Brave 检索失败（HTTP 500）',
+        fetchedAt: '2026-03-28T12:00:00.000Z'
+      }))
+    };
+    const llmService = {
+      generateArticle: vi.fn(async () => ({
+        content: '即使检索失败也成功生成',
+        metadata: {}
+      })),
+      rewriteArticle: vi.fn()
+    };
+
+    const taskManager = new TaskManager(
+      database as unknown as ConstructorParameters<typeof TaskManager>[0],
+      llmService as unknown as ConstructorParameters<typeof TaskManager>[1],
+      {} as ConstructorParameters<typeof TaskManager>[2],
+      searchService as unknown as ConstructorParameters<typeof TaskManager>[3]
+    );
+
+    const batch = await taskManager.createGenerateBatch({
+      titles: ['最新 AI 模型价格对比'],
+      options: DEFAULT_GENERATE_OPTIONS
+    });
+
+    await waitForCondition(async () => {
+      const nextBatch = await taskManager.getBatch(batch.id);
+      expect(nextBatch?.status).toBe('completed');
+      expect(nextBatch?.jobs[0]?.metadata?.search?.status).toBe('failed');
+    });
+  });
+
+  it('does not call Brave search for rewrite jobs', async () => {
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      apiKey: 'test-key',
+      braveApiKey: 'brave-key',
+      model: 'test-model',
+      maxConcurrentJobs: 1
+    };
+    const database = new FakeDatabaseService(settings);
+    const searchService = {
+      searchGenerateGrounding: vi.fn()
+    };
+    const llmService = {
+      generateArticle: vi.fn(),
+      rewriteArticle: vi.fn(async () => ({
+        content: '改写结果',
+        metadata: {}
+      }))
+    };
+
+    const taskManager = new TaskManager(
+      database as unknown as ConstructorParameters<typeof TaskManager>[0],
+      llmService as unknown as ConstructorParameters<typeof TaskManager>[1],
+      {} as ConstructorParameters<typeof TaskManager>[2],
+      searchService as unknown as ConstructorParameters<typeof TaskManager>[3]
+    );
+
+    const batch = await taskManager.createRewriteBatch({
+      sources: [
+        {
+          filePath: '/tmp/source.txt',
+          fileName: 'source.txt',
+          title: '原始标题',
+          sourceText: '这是一段足够长的原始文本内容，用来验证改写流程不会触发 Brave 检索服务。',
+          errorMessage: null
+        }
+      ],
+      options: DEFAULT_REWRITE_OPTIONS
+    });
+
+    await waitForCondition(async () => {
+      const nextBatch = await taskManager.getBatch(batch.id);
+      expect(nextBatch?.status).toBe('completed');
+    });
+
+    expect(searchService.searchGenerateGrounding).not.toHaveBeenCalled();
   });
 });

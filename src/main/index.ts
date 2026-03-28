@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import { join } from 'node:path';
 
 import { registerIpcHandlers } from './ipc';
+import { BraveSearchService } from './services/brave-search-service';
 import { DatabaseService } from './services/database';
 import { FileService } from './services/file-service';
 import { LlmService } from './services/llm-service';
@@ -39,7 +40,8 @@ app.whenReady().then(async () => {
   const exportRoot = join(app.getPath('documents'), 'ToutiaoArticleExports');
   const fileService = new FileService(exportRoot);
   const llmService = new LlmService();
-  const taskManager = new TaskManager(database, llmService, fileService);
+  const braveSearchService = new BraveSearchService();
+  const taskManager = new TaskManager(database, llmService, fileService, braveSearchService);
 
   registerIpcHandlers({
     database,

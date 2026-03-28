@@ -1,4 +1,4 @@
-import type { GenerateOptions, RewriteOptions } from '@shared/types';
+import type { GenerateOptions, RewriteOptions, SearchMetadata } from '@shared/types';
 
 function formatAvoidTerms(value: string): string {
   const items = value
@@ -13,9 +13,44 @@ export function buildGeneratePrompts(title: string, options: GenerateOptions): {
   systemPrompt: string;
   userPrompt: string;
 } {
+  return buildGeneratePromptsWithGrounding(title, options, null);
+}
+
+export function buildGeneratePromptsWithGrounding(
+  title: string,
+  options: GenerateOptions,
+  searchMetadata: SearchMetadata | null
+): {
+  systemPrompt: string;
+  userPrompt: string;
+} {
+  const groundingSection =
+    searchMetadata?.status === 'used' && searchMetadata.sources.length > 0
+      ? [
+          '实时检索资料：',
+          ...searchMetadata.sources.map((source, index) =>
+            [
+              `${index + 1}. 标题：${source.title}`,
+              `URL：${source.url}`,
+              source.publishedAt ? `日期：${source.publishedAt}` : null,
+              ...source.snippets.map((snippet, snippetIndex) => `摘录 ${snippetIndex + 1}：${snippet}`)
+            ]
+              .filter(Boolean)
+              .join('\n')
+          )
+        ].join('\n')
+      : null;
+
   return {
     systemPrompt:
-      '你是一名资深中文内容编辑，擅长为今日头条风格的内容创作原创文章。输出必须自然、具体、可读，避免明显 AI 套话、空洞总结和过度夸张的标题党表达。',
+      [
+        '你是一名资深中文内容编辑，擅长为今日头条风格的内容创作原创文章。',
+        '输出必须自然、具体、可读，避免明显 AI 套话、空洞总结和过度夸张的标题党表达。',
+        '如果提供了实时检索资料，只能将其用于时间敏感的事实信息。',
+        '不要编造数字、日期、排行、政策细节或版本信息。',
+        '如果资料之间存在冲突，请使用谨慎措辞，不要强行下结论。',
+        '正文中不要输出引用标记、URL、来源列表或“根据搜索结果”等提示语。'
+      ].join(' '),
     userPrompt: [
       `请围绕以下标题撰写一篇适合今日头条发布的中文文章。`,
       `标题：${title}`,
@@ -24,13 +59,17 @@ export function buildGeneratePrompts(title: string, options: GenerateOptions): {
       `整体语气：${options.tonePreset}`,
       `开头要求：${options.openingHookEnabled ? '需要有吸引力的开场' : '直接进入主题'}`,
       `尽量避免使用的词语：${formatAvoidTerms(options.avoidTerms)}`,
+      groundingSection,
       '输出要求：',
       '1. 第一行输出标题。',
       '2. 正文结构完整，段落清晰，适合直接导出为纯文本。',
       '3. 不要使用 Markdown、编号提纲或“总之”“综上所述”式收尾。',
       '4. 内容要具体，不要编造明显无法验证的数据。',
-      '5. 保持原创表达，减少模板化套话。'
-    ].join('\n')
+      '5. 保持原创表达，减少模板化套话。',
+      '6. 不要在正文中输出链接、引用编号或来源清单。'
+    ]
+      .filter(Boolean)
+      .join('\n')
   };
 }
 

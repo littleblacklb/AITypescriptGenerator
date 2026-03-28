@@ -15,6 +15,20 @@ npm run build
 npm run test
 ```
 
+## Live Brave API Test
+
+Run the real Brave LLM Context API smoke test with full request/response logs:
+
+```bash
+BRAVE_API_KEY=your_key npm run test:brave-api
+```
+
+Optional:
+
+```bash
+BRAVE_API_KEY=your_key BRAVE_TEST_QUERY="2026 年 AI 模型排行榜" npm run test:brave-api
+```
+
 ## Features
 
 - Paste one title per line and generate articles concurrently

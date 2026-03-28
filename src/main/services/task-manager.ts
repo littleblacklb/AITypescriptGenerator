@@ -14,6 +14,7 @@ import type {
 } from '@shared/types';
 
 import { DatabaseService } from './database';
+import { BraveSearchService } from './brave-search-service';
 import { FileService } from './file-service';
 import { LlmService } from './llm-service';
 
@@ -32,7 +33,8 @@ export class TaskManager {
   constructor(
     private readonly database: DatabaseService,
     private readonly llmService: LlmService,
-    private readonly fileService: FileService
+    private readonly fileService: FileService,
+    private readonly braveSearchService: BraveSearchService
   ) {}
 
   async createGenerateBatch(input: CreateGenerateBatchInput): Promise<BatchTaskWithJobs> {
@@ -316,11 +318,50 @@ export class TaskManager {
     const maxAttempts = Math.max(1, state.settings.retryCount + 1);
     let attempt = 0;
     let lastError: Error | null = null;
+    let searchController: AbortController | null = null;
+    let searchMetadata = job.metadata?.search ?? null;
 
     job.status = 'running';
     job.errorMessage = null;
     job.finishedAt = null;
     await this.database.updateJob(job);
+
+    if (job.type === 'generate') {
+      searchController = new AbortController();
+      state.activeControllers.set(job.id, searchController);
+
+      try {
+        searchMetadata = await this.braveSearchService.searchGenerateGrounding(
+          job.title,
+          state.settings,
+          mergeGenerateOptions(state.batch.options),
+          searchController.signal
+        );
+        job.metadata = {
+          ...(job.metadata ?? {}),
+          search: searchMetadata
+        };
+        await this.database.updateJob(job);
+      } catch (error) {
+        state.activeControllers.delete(job.id);
+
+        if (searchController.signal.aborted || state.cancelRequested) {
+          job.status = 'cancelled';
+          job.errorMessage = '任务已取消';
+          job.finishedAt = new Date().toISOString();
+          job.metadata = {
+            ...(job.metadata ?? {}),
+            ...(searchMetadata ? { search: searchMetadata } : {})
+          };
+          await this.persistTerminalJobState(state, job);
+          return;
+        }
+
+        throw error;
+      } finally {
+        state.activeControllers.delete(job.id);
+      }
+    }
 
     while (attempt < maxAttempts) {
       attempt += 1;
@@ -334,6 +375,7 @@ export class TaskManager {
                 job.title,
                 state.settings,
                 mergeGenerateOptions(state.batch.options),
+                searchMetadata,
                 controller.signal
               )
             : await this.llmService.rewriteArticle(
@@ -347,8 +389,10 @@ export class TaskManager {
         job.status = 'succeeded';
         job.resultText = result.content;
         job.metadata = {
+          ...(job.metadata ?? {}),
           ...result.metadata,
-          attempt
+          attempt,
+          ...(searchMetadata ? { search: searchMetadata } : {})
         };
         job.finishedAt = new Date().toISOString();
         await this.persistTerminalJobState(state, job);
@@ -359,6 +403,11 @@ export class TaskManager {
           job.status = 'cancelled';
           job.errorMessage = '任务已取消';
           job.finishedAt = new Date().toISOString();
+          job.metadata = {
+            ...(job.metadata ?? {}),
+            attempt,
+            ...(searchMetadata ? { search: searchMetadata } : {})
+          };
           await this.persistTerminalJobState(state, job);
           return;
         }
@@ -367,6 +416,11 @@ export class TaskManager {
           job.status = 'failed';
           job.errorMessage = lastError.message;
           job.finishedAt = new Date().toISOString();
+          job.metadata = {
+            ...(job.metadata ?? {}),
+            attempt,
+            ...(searchMetadata ? { search: searchMetadata } : {})
+          };
           await this.persistTerminalJobState(state, job);
           return;
         }
@@ -378,6 +432,11 @@ export class TaskManager {
     job.status = 'failed';
     job.errorMessage = lastError?.message ?? '任务执行失败';
     job.finishedAt = new Date().toISOString();
+    job.metadata = {
+      ...(job.metadata ?? {}),
+      attempt,
+      ...(searchMetadata ? { search: searchMetadata } : {})
+    };
     await this.persistTerminalJobState(state, job);
   }
 
