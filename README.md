@@ -12,8 +12,13 @@ Electron + React + TypeScript desktop app for:
 npm install
 npm run dev
 npm run build
+npm run build:win
 npm run test
 ```
+
+`npm run build:win` creates a Windows NSIS installer in `dist/`.
+
+If you are on Apple Silicon macOS, `electron-builder` may fail during the Windows packaging step because its Wine helper is x64-only. In that case, use the GitHub Actions workflow in `.github/workflows/build-windows.yml` or run the command on a Windows machine.
 
 ## Live Brave API Test
 

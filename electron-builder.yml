@@ -1,0 +1,16 @@
+appId: com.batcharticlegenerator.app
+productName: Batch Article Generator
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - node_modules/sql.js/dist/*.wasm
+win:
+  target:
+    - nsis
+  executableName: BatchArticleGenerator
+  artifactName: batch-article-generator-${version}-${arch}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
